@@ -10,13 +10,13 @@ Developed and maintained by **GoldTech MX**.
 ## Why does this tool exist in two phases?
 
 The Lucid REST API can export **PNG images and JSON metadata only**.
-It cannot produce PDF, VSDX, or `.lucid` files — those formats are not exposed through the API
+It cannot produce PDF, VSDX, or `.lucid` files - those formats are not exposed through the API
 at all. Because of that hard limit, the tool is deliberately split into two phases:
 
 | Phase | Transport | What it exports | Speed | Resilience |
 |-------|-----------|-----------------|-------|------------|
-| **1 — API** | Lucid REST API | Inventory, high-res PNG per page, document metadata, Obsidian notes | Fast; 60 exports/5 s | Fully resumable via SQLite state |
-| **2 — Browser** | Playwright → lucid.app UI | PDF (all products); VSDX (Lucidchart only) | Slower; human-paced with jitter | Failures recorded and retried; never block the run |
+| **1 - API** | Lucid REST API | Inventory, high-res PNG per page, document metadata, Obsidian notes | Fast; 60 exports/5 s | Fully resumable via SQLite state |
+| **2 - Browser** | Playwright → lucid.app UI | PDF (all products); VSDX (Lucidchart only) | Slower; human-paced with jitter | Failures recorded and retried; never block the run |
 
 If you only need PNGs and Markdown notes you can run `--skip-browser`.
 If PDFs and VSDX are critical, run both phases.
@@ -25,20 +25,20 @@ If PDFs and VSDX are critical, run both phases.
 
 ## What you get
 
-- **Full account coverage** — owned documents, shared documents, and team-folder documents;
+- **Full account coverage** - owned documents, shared documents, and team-folder documents;
   trashed items are excluded by default.
-- **Obsidian vault** — folder tree mirrors your Lucid workspace.  Each document becomes a
+- **Obsidian vault** - folder tree mirrors your Lucid workspace.  Each document becomes a
   `.md` note with YAML frontmatter, `![[...]]` PNG embeds (one per page), and sidecar links
   to any PDF / VSDX that was downloaded.
 - **Audit manifest** under `_manifest/`:
-  - `inventory.csv` — every document with metadata and per-artifact status
-  - `errors.csv` — every failure with message and timestamp
-  - `verification.md` — summary counts; lists docs that still need a `retry`
-  - `cancellation-checklist.md` — Spanish-language pre-cancellation checklist
-- **Resumable** — progress is stored in `_lucid_export_state.sqlite`; already-`ok` artifacts
+  - `inventory.csv` - every document with metadata and per-artifact status
+  - `errors.csv` - every failure with message and timestamp
+  - `verification.md` - summary counts; lists docs that still need a `retry`
+  - `cancellation-checklist.md` - Spanish-language pre-cancellation checklist
+- **Resumable** - progress is stored in `_lucid_export_state.sqlite`; already-`ok` artifacts
   are skipped on re-run. Use `--force` to re-export everything, `retry` to reprocess only
   failed artifacts.
-- **Read-only against Lucid** — the tool never writes, creates, or deletes anything on the
+- **Read-only against Lucid** - the tool never writes, creates, or deletes anything on the
   Lucid side. Tokens are stored locally and are never written to logs.
 
 ---
@@ -96,7 +96,7 @@ lucid-vault-exporter auth
 # 5. Sign in to lucid.app for Phase 2 (PDF/VSDX browser automation)
 lucid-vault-exporter login
 
-# 6. Smoke test the browser phase — caps PDF/VSDX to two documents
+# 6. Smoke test the browser phase - caps PDF/VSDX to two documents
 #    (Phase 1 still inventories and PNG-exports every document; --limit only
 #     bounds the slower, more fragile Phase 2 so you can validate it cheaply)
 lucid-vault-exporter export --limit 2
@@ -116,8 +116,8 @@ lucid-vault-exporter verify
 | `auth` | Runs the OAuth2 authorization flow in your browser; stores tokens in `.lucid_tokens.json`. |
 | `login` | Opens a visible Chromium window so you can sign in to lucid.app (SSO/2FA supported); the session persists in `.pw-profile/` for headless Phase 2 runs. |
 | `export` | Runs Phase 1 (API: inventory, PNGs, notes) then Phase 2 (browser: PDF/VSDX). |
-| `export --skip-browser` | Phase 1 (API) only — no Playwright required. |
-| `export --only-browser` | Phase 2 (browser) only — useful when Phase 1 already finished. |
+| `export --skip-browser` | Phase 1 (API) only - no Playwright required. |
+| `export --only-browser` | Phase 2 (browser) only - useful when Phase 1 already finished. |
 | `export --force` | Re-exports every artifact, overwriting existing files. |
 | `export --limit N` | Browser phase: stop after N documents. Use this for a quick smoke test. |
 | `retry` | Resets all `failed` artifacts to `pending` then runs `export` again. |
@@ -179,7 +179,7 @@ combination (`png`, `pdf`, `vsdx`) with statuses: `pending`, `in_progress`, `ok`
 
 | Scenario | What to do |
 |----------|-----------|
-| Run interrupted or crashed | Re-run `export` — already-`ok` artifacts are skipped automatically. |
+| Run interrupted or crashed | Re-run `export` - already-`ok` artifacts are skipped automatically. |
 | Want to re-export everything | `export --force` resets all statuses first. |
 | Some artifacts failed | `retry` resets `failed` → `pending` and re-runs export. |
 | Just want updated counts | `verify` recounts and rewrites the manifest without exporting. |
@@ -252,7 +252,7 @@ exported_by: lucid-vault-exporter
 
 This tool can run with its working directory on a network share (e.g. a mapped drive on Z:).
 However, writing tens of thousands of small files during a long multi-hour export directly
-to an SMB share or NAS is **slow and fragile** — network hiccups can corrupt the SQLite state
+to an SMB share or NAS is **slow and fragile** - network hiccups can corrupt the SQLite state
 file mid-write.
 
 **Recommendation:** export to a local disk first, then copy the finished vault:
@@ -280,19 +280,19 @@ first live run.
 
 If a first run surfaces a shape mismatch (e.g. the search response is wrapped in an object
 rather than a bare array, or a selector has changed), the fix will be in `lucid_client.py` or
-`exporter_browser.py` respectively — both files call out the provisional sections with `NOTE:`
+`exporter_browser.py` respectively - both files call out the provisional sections with `NOTE:`
 comments.
 
 ---
 
 ## Safety and privacy
 
-- **Read-only against Lucid** — the tool never creates, updates, or deletes anything on the
+- **Read-only against Lucid** - the tool never creates, updates, or deletes anything on the
   Lucid platform.
 - **Tokens** are stored in `.lucid_tokens.json` (gitignored) and are never written to log
   output at any log level.
 - **Browser session** is stored in `.pw-profile/` (gitignored). It contains cookies for
-  lucid.app — treat it like a password file.
+  lucid.app - treat it like a password file.
 - Neither file is committed to git. The `.gitignore` excludes both by default.
 
 ---
