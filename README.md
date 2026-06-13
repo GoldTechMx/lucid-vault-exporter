@@ -1,0 +1,326 @@
+# Lucid Vault Exporter
+
+**Turn an entire Lucid (Lucidchart / Lucidspark) account into a local, portable, Obsidian-ready vault.**
+
+Read-only, resumable, and built for accounts that are being cancelled or migrated.
+Developed and maintained by **GoldTech MX**.
+
+---
+
+## Why does this tool exist in two phases?
+
+The Lucid REST API can export **PNG images and JSON metadata only**.
+It cannot produce PDF, VSDX, or `.lucid` files — those formats are not exposed through the API
+at all. Because of that hard limit, the tool is deliberately split into two phases:
+
+| Phase | Transport | What it exports | Speed | Resilience |
+|-------|-----------|-----------------|-------|------------|
+| **1 — API** | Lucid REST API | Inventory, high-res PNG per page, document metadata, Obsidian notes | Fast; 60 exports/5 s | Fully resumable via SQLite state |
+| **2 — Browser** | Playwright → lucid.app UI | PDF (all products); VSDX (Lucidchart only) | Slower; human-paced with jitter | Failures recorded and retried; never block the run |
+
+If you only need PNGs and Markdown notes you can run `--skip-browser`.
+If PDFs and VSDX are critical, run both phases.
+
+---
+
+## What you get
+
+- **Full account coverage** — owned documents, shared documents, and team-folder documents;
+  trashed items are excluded by default.
+- **Obsidian vault** — folder tree mirrors your Lucid workspace.  Each document becomes a
+  `.md` note with YAML frontmatter, `![[...]]` PNG embeds (one per page), and sidecar links
+  to any PDF / VSDX that was downloaded.
+- **Audit manifest** under `_manifest/`:
+  - `inventory.csv` — every document with metadata and per-artifact status
+  - `errors.csv` — every failure with message and timestamp
+  - `verification.md` — summary counts; lists docs that still need a `retry`
+  - `cancellation-checklist.md` — Spanish-language pre-cancellation checklist
+- **Resumable** — progress is stored in `_lucid_export_state.sqlite`; already-`ok` artifacts
+  are skipped on re-run. Use `--force` to re-export everything, `retry` to reprocess only
+  failed artifacts.
+- **Read-only against Lucid** — the tool never writes, creates, or deletes anything on the
+  Lucid side. Tokens are stored locally and are never written to logs.
+
+---
+
+## Creating the Lucid OAuth2 app (required before first run)
+
+The Lucid API uses OAuth 2.0. You need to register a developer application once.
+
+> **Note:** API key access with pre-authorized grants is an Enterprise-tier feature.
+> For Pro accounts, OAuth2 is the standard path.
+
+1. Go to **https://lucid.app/developer** and sign in.
+2. Click **Create Application** and give it a name (e.g. "Vault Exporter").
+3. Under the application, click **Add OAuth 2.0 Client**.
+4. Set the **Redirect URI** to exactly:
+   ```
+   http://localhost:8765/callback
+   ```
+5. Request the following **scopes**:
+   ```
+   lucidchart.document.content:readonly
+   lucidspark.document.content:readonly
+   lucidscale.document.content:readonly
+   folder:readonly
+   offline_access
+   user.profile
+   ```
+6. Copy the **Client ID** and **Client Secret** into your `.env` file:
+   ```ini
+   LUCID_CLIENT_ID=your_client_id_here
+   LUCID_CLIENT_SECRET=your_client_secret_here
+   ```
+
+---
+
+## Quick start (CLI)
+
+```bash
+# 1. Clone and install
+git clone https://github.com/GoldTechMx/lucid-vault-exporter.git
+cd lucid-vault-exporter
+python -m pip install -e ".[browser,web]"
+python -m playwright install chromium
+
+# 2. Configure credentials
+cp .env.example .env
+# Edit .env: fill LUCID_CLIENT_ID and LUCID_CLIENT_SECRET
+
+# 3. Write config.yml
+lucid-vault-exporter init
+
+# 4. Authorize via OAuth2 (opens your default browser)
+lucid-vault-exporter auth
+
+# 5. Sign in to lucid.app for Phase 2 (PDF/VSDX browser automation)
+lucid-vault-exporter login
+
+# 6. Smoke test the browser phase — caps PDF/VSDX to two documents
+#    (Phase 1 still inventories and PNG-exports every document; --limit only
+#     bounds the slower, more fragile Phase 2 so you can validate it cheaply)
+lucid-vault-exporter export --limit 2
+
+# 7. Full export
+lucid-vault-exporter export
+
+# 8. Verify and write the final manifest
+lucid-vault-exporter verify
+```
+
+### Command reference
+
+| Command | What it does |
+|---------|--------------|
+| `init` | Writes `config.yml` in the current directory (refuses to overwrite). |
+| `auth` | Runs the OAuth2 authorization flow in your browser; stores tokens in `.lucid_tokens.json`. |
+| `login` | Opens a visible Chromium window so you can sign in to lucid.app (SSO/2FA supported); the session persists in `.pw-profile/` for headless Phase 2 runs. |
+| `export` | Runs Phase 1 (API: inventory, PNGs, notes) then Phase 2 (browser: PDF/VSDX). |
+| `export --skip-browser` | Phase 1 (API) only — no Playwright required. |
+| `export --only-browser` | Phase 2 (browser) only — useful when Phase 1 already finished. |
+| `export --force` | Re-exports every artifact, overwriting existing files. |
+| `export --limit N` | Browser phase: stop after N documents. Use this for a quick smoke test. |
+| `retry` | Resets all `failed` artifacts to `pending` then runs `export` again. |
+| `verify` | Recounts artifact statuses, rewrites `_manifest/verification.md`. |
+| `serve` | Starts the local web UI (see below). |
+
+---
+
+## Web UI
+
+```bash
+lucid-vault-exporter serve
+# → http://127.0.0.1:8123
+```
+
+The web UI runs **Phase 1 (API)** with live progress bars and Start / Resume / Stop controls.
+It is accessible on localhost only and requires the `[web]` extra:
+
+```bash
+pip install "lucid-vault-exporter[web]"
+```
+
+> **Phase 2 (PDF/VSDX browser automation) stays CLI-only.** The browser login window needs to
+> be visible on first use (SSO/2FA), which is not practical inside a headless web server
+> process. Run `lucid-vault-exporter login` and `lucid-vault-exporter export` from a terminal
+> for Phase 2.
+
+---
+
+## Rate limits
+
+Lucid's documented per-account limits are:
+
+| Endpoint group | Documented limit | Tool default |
+|----------------|-----------------|--------------|
+| Document export (PNG) | 75 requests / 5 s | 60 / 5 s |
+| Document search | 300 requests / 5 s | 240 / 5 s |
+
+The tool stays comfortably under the published limits by default. On HTTP 429 it reads the
+`Retry-After` header and pauses accordingly. For a large account (thousands of documents, many
+pages each) a complete Phase 1 run may take several hours; the defaults are tuned to glide
+just under the limit without manual intervention.
+
+Both values are configurable in `config.yml`:
+
+```yaml
+rate_limit:
+  export_per_5s: 60    # raise toward 75 if you want faster PNGs
+  search_per_5s: 240   # raise toward 300 if inventory is slow
+```
+
+---
+
+## Resume, force, retry, and verify
+
+The SQLite state file (`_lucid_export_state.sqlite`) tracks every document × artifact
+combination (`png`, `pdf`, `vsdx`) with statuses: `pending`, `in_progress`, `ok`, `failed`,
+`skipped`.
+
+| Scenario | What to do |
+|----------|-----------|
+| Run interrupted or crashed | Re-run `export` — already-`ok` artifacts are skipped automatically. |
+| Want to re-export everything | `export --force` resets all statuses first. |
+| Some artifacts failed | `retry` resets `failed` → `pending` and re-runs export. |
+| Just want updated counts | `verify` recounts and rewrites the manifest without exporting. |
+
+---
+
+## Output layout
+
+```
+<output_dir>/               # default: ./exports/lucid-vault/
+  Clientes/
+    ACME/
+      Mapa de Procesos.md              # note: YAML frontmatter + PNG embeds + sidecar links
+      _assets/
+        Mapa de Procesos a1b2c3d4 p1.png   # one PNG per page (page number in filename)
+        Mapa de Procesos a1b2c3d4 p2.png
+      Mapa de Procesos a1b2c3d4.pdf        # Phase 2 browser sidecar
+      Mapa de Procesos a1b2c3d4.vsdx       # Phase 2 browser sidecar (Lucidchart only)
+  Proyectos/
+    Sprint Board.md
+    _assets/
+      Sprint Board e5f6a7b8 p1.png
+    Sprint Board e5f6a7b8.pdf
+  _manifest/
+    inventory.csv              # full document inventory with artifact statuses
+    errors.csv                 # every error with message and timestamp
+    verification.md            # summary counts; lists docs needing retry
+    cancellation-checklist.md  # pre-cancellation checklist
+    browser_failures/          # screenshots of failed browser export attempts
+      <doc_id>-pdf.png
+  _lucid_export_state.sqlite   # SQLite state; never delete while a run is in progress
+```
+
+Each `.md` note looks like this:
+
+```markdown
+---
+lucid_id: a1b2c3d4e5f6
+title: 'Mapa de Procesos'
+product: lucidchart
+folder: 'Clientes/ACME'
+pages: 2
+created: 2024-01-15T10:30:00Z
+last_modified: 2024-06-01T08:00:00Z
+owner: 'user@company.com'
+version: '5'
+original_url: https://lucid.app/lucidchart/a1b2c3d4e5f6/edit
+exported_by: lucid-vault-exporter
+---
+
+# Mapa de Procesos
+
+> Diagrama exportado de Lucid (lucidchart). Original: https://lucid.app/lucidchart/a1b2c3d4e5f6/edit
+
+![[Mapa de Procesos a1b2c3d4 p1.png]]
+
+![[Mapa de Procesos a1b2c3d4 p2.png]]
+
+## Archivos
+- [[Mapa de Procesos a1b2c3d4.pdf]]
+- [[Mapa de Procesos a1b2c3d4.vsdx]]
+```
+
+> The note body uses Spanish display strings (`Diagrama exportado de Lucid…`, `## Archivos`)
+> matching the cancellation checklist; the YAML keys remain English for tooling.
+
+---
+
+## Output path and SMB share note
+
+This tool can run with its working directory on a network share (e.g. a mapped drive on Z:).
+However, writing tens of thousands of small files during a long multi-hour export directly
+to an SMB share or NAS is **slow and fragile** — network hiccups can corrupt the SQLite state
+file mid-write.
+
+**Recommendation:** export to a local disk first, then copy the finished vault:
+
+```powershell
+# Export to local SSD
+lucid-vault-exporter export   # with output_dir: D:/lucid_export in config.yml
+
+# Then copy the finished vault to the network location
+robocopy D:\lucid_export Z:\Vaults\lucid-vault /E /COPYALL /R:3 /W:5
+```
+
+---
+
+## Provisional API note
+
+The Lucid search-response shape, pagination mechanism, folder-contents format, and the
+browser export-dialog selectors / editor URLs were implemented against Lucid's published API
+documentation and reconciled with available examples. They are marked **PROVISIONAL** in the
+source code and must be validated against the live API and UI on the first real run (Task 15).
+
+See **[docs/lucid-api-notes.md](docs/lucid-api-notes.md)** for the full technical breakdown:
+what the implementation assumes, what is provisional, and a reconciliation checklist for that
+first live run.
+
+If a first run surfaces a shape mismatch (e.g. the search response is wrapped in an object
+rather than a bare array, or a selector has changed), the fix will be in `lucid_client.py` or
+`exporter_browser.py` respectively — both files call out the provisional sections with `NOTE:`
+comments.
+
+---
+
+## Safety and privacy
+
+- **Read-only against Lucid** — the tool never creates, updates, or deletes anything on the
+  Lucid platform.
+- **Tokens** are stored in `.lucid_tokens.json` (gitignored) and are never written to log
+  output at any log level.
+- **Browser session** is stored in `.pw-profile/` (gitignored). It contains cookies for
+  lucid.app — treat it like a password file.
+- Neither file is committed to git. The `.gitignore` excludes both by default.
+
+---
+
+## Installation extras
+
+| Extra | What it adds | Install |
+|-------|--------------|---------|
+| `[browser]` | Playwright (required for Phase 2 PDF/VSDX) | `pip install "lucid-vault-exporter[browser]"` |
+| `[web]` | FastAPI + Uvicorn (required for `serve`) | `pip install "lucid-vault-exporter[web]"` |
+| `[browser,web]` | Both | `pip install "lucid-vault-exporter[browser,web]"` |
+
+After installing `[browser]`, install the browser binary once:
+
+```bash
+python -m playwright install chromium
+```
+
+---
+
+## Requirements
+
+- Python 3.11+
+- Lucid account (Pro or Enterprise) with API access enabled
+- OAuth2 app registered at https://lucid.app/developer
+
+---
+
+## License
+
+Apache-2.0 © GoldTech MX

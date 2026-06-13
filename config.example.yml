@@ -1,0 +1,13 @@
+output_dir: ./exports/lucid-vault
+products: [lucidchart, lucidspark, lucidscale]
+exclude_trashed: true
+png_dpi: 160            # passed as crop/scale hint; PNGs are auto-scaled by Lucid if huge
+browser:
+  enabled: true
+  formats: [pdf, vsdx]  # vsdx auto-skipped for non-lucidchart docs
+  headless: true
+  min_delay_seconds: 3.0
+  max_delay_seconds: 7.0
+rate_limit:
+  export_per_5s: 60     # documented 75/5s; stay under
+  search_per_5s: 240    # documented 300/5s; stay under

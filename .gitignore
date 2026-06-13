@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+config.yml
+exports/
+.lucid_tokens.json
+.pw-profile/
+
+# Internal tooling / AI-workflow artifacts — not part of the published tool
+CLAUDE.md
+.claude/
+docs/superpowers/
+graphify-out/
+.vs/
+*.code-workspace
