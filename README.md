@@ -96,9 +96,7 @@ lucid-vault-exporter auth
 # 5. Sign in to lucid.app for Phase 2 (PDF/VSDX browser automation)
 lucid-vault-exporter login
 
-# 6. Smoke test the browser phase - caps PDF/VSDX to two documents
-#    (Phase 1 still inventories and PNG-exports every document; --limit only
-#     bounds the slower, more fragile Phase 2 so you can validate it cheaply)
+# 6. Smoke test - caps BOTH phases (API + browser) to two documents end-to-end
 lucid-vault-exporter export --limit 2
 
 # 7. Full export
@@ -119,7 +117,7 @@ lucid-vault-exporter verify
 | `export --skip-browser` | Phase 1 (API) only - no Playwright required. |
 | `export --only-browser` | Phase 2 (browser) only - useful when Phase 1 already finished. |
 | `export --force` | Re-exports every artifact, overwriting existing files. |
-| `export --limit N` | Browser phase: stop after N documents. Use this for a quick smoke test. |
+| `export --limit N` | Smoke test: caps both phases (API + browser) to the first N documents. |
 | `retry` | Resets all `failed` artifacts to `pending` then runs `export` again. |
 | `verify` | Recounts artifact statuses, rewrites `_manifest/verification.md`. |
 | `serve` | Starts the local web UI (see below). |
@@ -250,10 +248,21 @@ exported_by: lucid-vault-exporter
 
 ## Output path and SMB share note
 
-This tool can run with its working directory on a network share (e.g. a mapped drive on Z:).
-However, writing tens of thousands of small files during a long multi-hour export directly
-to an SMB share or NAS is **slow and fragile** - network hiccups can corrupt the SQLite state
-file mid-write.
+This tool can run with its working directory on a network share (e.g. a mapped drive on Z:),
+but two things on network filesystems need care:
+
+- **The Python virtualenv must live on a local disk.** Native extension DLLs (Playwright's
+  `greenlet`, etc.) fail to load from a UNC/SMB path on Windows (`ImportError: DLL load
+  failed`). Create the venv on `C:` even if the source tree is on a share - editable installs
+  read the source over the network fine; only the compiled dependencies must be local.
+- **SQLite cannot run on many SMB/NFS shares** (it raises `disk I/O error` because the share
+  can't provide the file locking / shared-memory WAL needs). The tool handles this
+  automatically: if `output_dir` is on such a share, the state DB transparently falls back to
+  local disk under `%LOCALAPPDATA%\lucid-vault-exporter\state\` while the vault files still
+  write to `output_dir`. You'll see a one-line warning telling you where state landed.
+
+Even with the fallback, writing tens of thousands of small files to a share during a long
+run is **slow**, so:
 
 **Recommendation:** export to a local disk first, then copy the finished vault:
 
@@ -267,21 +276,24 @@ robocopy D:\lucid_export Z:\Vaults\lucid-vault /E /COPYALL /R:3 /W:5
 
 ---
 
-## Provisional API note
+## Verified against the live API and UI
 
-The Lucid search-response shape, pagination mechanism, folder-contents format, and the
-browser export-dialog selectors / editor URLs were implemented against Lucid's published API
-documentation and reconciled with available examples. They are marked **PROVISIONAL** in the
-source code and must be validated against the live API and UI on the first real run (Task 15).
+The implementation has been reconciled against a real Lucid account (2026-06):
 
-See **[docs/lucid-api-notes.md](docs/lucid-api-notes.md)** for the full technical breakdown:
-what the implementation assumes, what is provisional, and a reconciliation checklist for that
-first live run.
+- **Document search** returns a bare JSON array; pagination is the `Link: <url>; rel="next"`
+  header with a `pageToken`. Fields used (`documentId`, `title`, `product`, `parent`,
+  `pageCount`, `version`, `created`, `lastModified`, `editUrl`, `trashed`) match.
+- **PNG export** is `GET /documents/{id}?page=N` with `Accept: image/png` - confirmed.
+- **Folder hierarchy** requires the `folder:readonly` scope. Without it, `/folders/{id}`
+  returns `403 accessForbidden` and the vault is flat; with it, nested paths resolve.
+- **Browser export** (PDF/VSDX) drives the editor menu: the hamburger menu → **Exportar** →
+  the format (**PDF** / **Visio (VSDX)**) → the **Descargar** dialog button. Selectors live in
+  `exporter_browser.py` (`SELECTORS` / `FORMAT_LABELS`); a Lucid UI change is a one-place fix.
 
-If a first run surfaces a shape mismatch (e.g. the search response is wrapped in an object
-rather than a bare array, or a selector has changed), the fix will be in `lucid_client.py` or
-`exporter_browser.py` respectively - both files call out the provisional sections with `NOTE:`
-comments.
+See **[docs/lucid-api-notes.md](docs/lucid-api-notes.md)** for the full technical breakdown.
+The Lucid UI is localized; the selectors target stable `data-test-id` attributes rather than
+visible text where possible, but the format labels (`Exportar`, `Visio (VSDX)`) are
+Spanish-UI strings - adjust them if your account renders in another language.
 
 ---
 

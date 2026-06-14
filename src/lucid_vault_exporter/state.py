@@ -7,12 +7,26 @@ Resume rule: anything not 'ok' is re-attempted; `--force` resets artifacts to pe
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+log = logging.getLogger("lucid_vault_exporter.state")
+
 STATE_FILENAME = "_lucid_export_state.sqlite"
+
+
+def _local_state_path(output_dir: Path) -> Path:
+    """A stable local-disk location for the state DB, keyed to the output dir. Used when the
+    output dir is on a filesystem SQLite can't run on (some SMB/NFS shares). Deterministic so
+    every command (export, verify, retry) resolves to the same state for the same output dir."""
+    base = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or Path.home())
+    key = hashlib.sha1(str(output_dir).lower().encode("utf-8")).hexdigest()[:16]
+    return base / "lucid-vault-exporter" / "state" / f"{key}.sqlite"
 ARTIFACT_KINDS = ("png", "pdf", "vsdx")
 VALID_STATUSES = ("pending", "in_progress", "ok", "failed", "skipped")
 
@@ -71,16 +85,44 @@ class StateDB:
 
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path))
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self._path = db_path
+        try:
+            self._conn = self._connect(wal=True)
+        except sqlite3.OperationalError as exc:
+            # WAL needs shared-memory (-wal/-shm) files, which network filesystems (SMB/NFS)
+            # frequently cannot provide -> "disk I/O error". Fall back to the portable
+            # rollback journal so an export to a mapped/UNC drive still works (a bit slower).
+            log.warning("WAL journal unavailable (%s); falling back to DELETE journal mode.", exc)
+            self._conn = self._connect(wal=False)
+
+    def _connect(self, *, wal: bool) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self._path))
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute(f"PRAGMA journal_mode={'WAL' if wal else 'DELETE'}")
+            conn.execute(f"PRAGMA synchronous={'NORMAL' if wal else 'FULL'}")
+            conn.executescript(_SCHEMA)
+            conn.commit()
+        except sqlite3.OperationalError:
+            conn.close()
+            raise
+        return conn
 
     @classmethod
     def open(cls, output_dir: Path) -> StateDB:
-        return cls(Path(output_dir) / STATE_FILENAME)
+        primary = Path(output_dir) / STATE_FILENAME
+        try:
+            return cls(primary)
+        except sqlite3.OperationalError:
+            # SQLite can't operate on this filesystem at all (some network shares fail even the
+            # DELETE journal). Keep state on local disk; vault files still write to output_dir.
+            local = _local_state_path(Path(output_dir))
+            log.warning(
+                "SQLite state cannot run under %s (network share?); keeping state on local disk "
+                "at %s. The exported vault still goes to %s.",
+                primary.parent, local, output_dir,
+            )
+            return cls(local)
 
     def close(self) -> None:
         self._conn.close()

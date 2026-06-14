@@ -27,8 +27,7 @@ SCOPES = (
     "lucidchart.document.content:readonly "
     "lucidspark.document.content:readonly "
     "lucidscale.document.content:readonly "
-    "folder:readonly offline_access "
-    "user.profile"
+    "folder:readonly offline_access user.profile"
 )
 REDIRECT_PORT = 8765
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"

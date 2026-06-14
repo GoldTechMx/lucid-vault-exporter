@@ -121,7 +121,7 @@ def export(
     skip_browser: Annotated[bool, typer.Option("--skip-browser")] = False,
     only_browser: Annotated[bool, typer.Option("--only-browser")] = False,
     force: Annotated[bool, typer.Option("--force", help="Re-export everything")] = False,
-    limit: Annotated[int, typer.Option("--limit", help="Browser phase: max docs (smoke test)")] = 0,
+    limit: Annotated[int, typer.Option("--limit", help="Smoke test: cap both phases to N")] = 0,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Run the export: Phase 1 (API: inventory+PNG+notes), Phase 2 (browser: PDF/VSDX)."""
@@ -146,7 +146,7 @@ def export(
                                     description=f"API: {label[:40]}")
 
                     stats = run_api_phase(client, db, vault, products=list(cfg.products),
-                                          progress=on_progress)
+                                          progress=on_progress, limit=limit)
             finally:
                 client.close()
             console.print(f"Phase 1 done: {stats}")

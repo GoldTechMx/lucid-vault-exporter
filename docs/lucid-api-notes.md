@@ -288,3 +288,27 @@ code if the live behaviour differs from the assumption:
 
 Update `docs/lucid-api-notes.md` after each item is confirmed, removing the PROVISIONAL
 label from confirmed items.
+
+---
+
+## Live reconciliation results (confirmed 2026-06)
+
+Validated against a real Lucid Pro account (~450 documents):
+
+| Item | Result |
+|---|---|
+| OAuth authorize / token URLs | `https://lucid.app/oauth2/authorize`, `https://api.lucid.co/oauth2/token` - correct |
+| Scopes | `lucidchart/lucidspark/lucidscale.document.content:readonly`, `folder:readonly`, `offline_access`, `user.profile` - all valid. `folder:readonly` IS required for folder names (omitting it gives 403 on `/folders`). |
+| Redirect URI | Must be registered **exactly** as `http://localhost:8765/callback` in the app. |
+| `POST /documents/search` | Bare JSON array; **no** `/v1/` prefix needed; `Lucid-Api-Version: 1` header. |
+| Pagination | `Link: <url...&pageToken=...>; rel="next"` response header. |
+| Document fields | `documentId`, `title`, `product`, `parent` (folder id, may be null), `pageCount`, `version`, `created`, `lastModified`, `editUrl`, `trashed`. (`owner` only on `GET /documents/{id}`, not in search results.) |
+| PNG export | `GET /documents/{id}?page=N`, `Accept: image/png` -> 200 image/png. |
+| `GET /folders/{id}` | Fields `id`, `name`, `parent`, `type`, `created`, `trashed`. 403 without `folder:readonly`. |
+| Browser export path | Hamburger menu (`data-test-id="header-hamburger-menu"`) -> menu item **Exportar** -> format (**PDF** / **Visio (VSDX)**, `data-test-id="menu-item-container"`, matched by substring) -> **Descargar** dialog button (`data-test-id="print-and-download-dialog-proceed-button"`). An AI popover auto-opens and must be dismissed with `Escape` first. |
+| Editor URL | `https://lucid.app/{product}/{id}/edit` - matches the API `editUrl` for Lucidchart. |
+| Rate limits | 75/5 s export, 300/5 s search - tool stays under (60/240) and honors `Retry-After`. |
+
+Operational notes: SQLite can't run on some SMB shares (state DB auto-falls back to local
+disk); the Python venv with native deps (Playwright/greenlet) must be on a local disk, not a
+UNC path.

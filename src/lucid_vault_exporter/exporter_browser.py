@@ -22,7 +22,7 @@ import random
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .state import StateDB
 from .utils import ensure_dir, sanitize_filename
@@ -31,16 +31,16 @@ log = logging.getLogger("lucid_vault_exporter.browser")
 
 VSDX_PRODUCTS = {"lucidchart"}
 
+# Validated against the live lucid.app editor (Spanish UI, 2026-06). The export path is:
+#   hamburger menu  ->  "Exportar"  ->  format ("PDF" / "Visio (VSDX)")  ->  "Descargar" dialog.
+# Menu entries are <... data-test-id="menu-item-container"> matched by their exact label.
 SELECTORS = {
-    "file_menu": '[data-test-id="file-menu"], span:has-text("File"), span:has-text("Archivo")',
-    "export_item": 'text=/Export|Exportar/i',
-    "format_pdf": 'text=/PDF/i',
-    "format_vsdx": 'text=/Visio|VSDX/i',
-    "download_button": (
-        'button:has-text("Download"), button:has-text("Descargar"),'
-        ' button:has-text("Export"), button:has-text("Exportar")'
-    ),
+    "file_menu": '[data-test-id="header-hamburger-menu"]',
+    "menu_item": '[data-test-id="menu-item-container"]',
+    "download_button": '[data-test-id="print-and-download-dialog-proceed-button"]',
 }
+EXPORT_LABEL = "Exportar"
+FORMAT_LABELS = {"pdf": "PDF", "vsdx": "Visio (VSDX)"}
 
 
 class BrowserDriver(Protocol):
@@ -87,21 +87,32 @@ class PlaywrightDriver:
         page.close()
         raise RuntimeError("Login was not completed within the timeout.")
 
+    def _menu_item(self, page: Any, label: str) -> Any:
+        """A Lucid editor menu entry matched by its label. Substring (not anchored): the menu
+        container's textContent can include hidden glyphs/submenu markers, so an exact-anchor
+        match misses. The labels we use ("Exportar", "PDF", "Visio (VSDX)") are each unique
+        within the menu that is open at the time, so a substring match is unambiguous."""
+        return page.locator(SELECTORS["menu_item"]).filter(has_text=label)
+
     def download_export(self, doc_id: str, fmt: str, *, product: str) -> bytes:
         page = self._ctx.new_page()
         try:
-            # NOTE: the per-product URL path (/{product}/) is also provisional and
-            # must be validated against the live lucid.app UI (Task 15).
             page.goto(f"https://lucid.app/{product}/{doc_id}/edit",
                       wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)  # editor boot
+            page.wait_for_timeout(8000)  # editor boot + canvas render
+            # The AI/onboarding popover auto-opens and intercepts pointer events; dismiss it.
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(600)
             page.locator(SELECTORS["file_menu"]).first.click(timeout=15000)
-            page.locator(SELECTORS["export_item"]).first.click(timeout=10000)
-            page.locator(SELECTORS[f"format_{fmt}"]).first.click(timeout=10000)
+            self._menu_item(page, EXPORT_LABEL).first.click(timeout=10000)
+            label = FORMAT_LABELS.get(fmt, fmt.upper())
             with page.expect_download(timeout=120000) as dl:
-                page.locator(SELECTORS["download_button"]).first.click(timeout=10000)
-            path = dl.value.path()
-            return Path(path).read_bytes()
+                self._menu_item(page, label).first.click(timeout=10000)
+                # Most formats open a print/download dialog with a "Descargar" proceed button;
+                # some download immediately, in which case this click simply finds nothing.
+                with contextlib.suppress(Exception):
+                    page.locator(SELECTORS["download_button"]).first.click(timeout=10000)
+            return Path(dl.value.path()).read_bytes()
         except Exception:
             if self._failure_dir:
                 ensure_dir(self._failure_dir)

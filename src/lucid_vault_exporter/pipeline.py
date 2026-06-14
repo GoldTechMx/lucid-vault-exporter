@@ -22,11 +22,14 @@ ProgressFn = Callable[[int, int, str], None]
 def run_api_phase(
     client: Any, db: StateDB, vault_dir: Path,
     *, products: list[str] | None = None, progress: ProgressFn | None = None,
-    should_stop: Callable[[], bool] | None = None,
+    should_stop: Callable[[], bool] | None = None, limit: int = 0,
 ) -> dict[str, int]:
     products = products or ["lucidchart", "lucidspark", "lucidscale"]
     n_docs = run_inventory(client, db, products=products)
     todo = db.documents_missing_artifact("png")
+    # `limit` caps the work to the first N pending documents (smoke test); 0 = no cap.
+    if limit:
+        todo = todo[:limit]
     stats = {"documents": n_docs, "png_ok": 0, "png_failed": 0}
     total = len(todo)
     for i, doc in enumerate(todo, 1):

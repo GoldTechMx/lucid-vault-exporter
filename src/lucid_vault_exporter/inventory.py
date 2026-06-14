@@ -24,8 +24,10 @@ class InventoryClient(Protocol):
     def get_folder(self, folder_id: str) -> dict[str, Any] | None: ...
 
 
-def _folder_path(client: InventoryClient, db: StateDB, folder_id: str | None) -> str:
-    if not folder_id:
+def _folder_path(
+    client: InventoryClient, db: StateDB, folder_id: str | None, forbidden: set[str]
+) -> str:
+    if not folder_id or folder_id in forbidden:
         return ""
     cached = db.get_folder(folder_id)
     if cached and cached.get("path") is not None:
@@ -36,7 +38,7 @@ def _folder_path(client: InventoryClient, db: StateDB, folder_id: str | None) ->
     seen: set[str] = set()
     prefix = ""  # full path of the first cached ancestor encountered, if any
     current: str | None = folder_id
-    while current and current not in seen and len(chain) < _MAX_DEPTH:
+    while current and current not in seen and current not in forbidden and len(chain) < _MAX_DEPTH:
         seen.add(current)
         cached = db.get_folder(current)
         if cached and cached.get("path") is not None:
@@ -44,6 +46,10 @@ def _folder_path(client: InventoryClient, db: StateDB, folder_id: str | None) ->
             break
         folder = client.get_folder(current)
         if folder is None:
+            # Inaccessible (e.g. 403 without folder scope, or a team folder). Remember it so
+            # we never re-request it - otherwise a no-folder-access account costs one forbidden
+            # call per document.
+            forbidden.add(current)
             break
         name = sanitize_filename(str(folder.get("name") or folder.get("title") or current))
         parent = folder.get("parent") or folder.get("parentId")
@@ -59,6 +65,7 @@ def _folder_path(client: InventoryClient, db: StateDB, folder_id: str | None) ->
 
 def run_inventory(client: InventoryClient, db: StateDB, *, products: list[str]) -> int:
     count = 0
+    forbidden: set[str] = set()  # folder ids known to be inaccessible (negative cache)
     for doc in client.search_documents(products=products, exclude_trashed=True):
         doc_id = str(doc.get("documentId") or doc.get("id"))
         folder_id = doc.get("parent") or doc.get("folderId")
@@ -70,7 +77,7 @@ def run_inventory(client: InventoryClient, db: StateDB, *, products: list[str]) 
             title=str(doc.get("title") or "untitled"),
             product=str(doc.get("product") or "lucidchart"),
             folder_id=str(folder_id) if folder_id else None,
-            folder_path=_folder_path(client, db, str(folder_id) if folder_id else None),
+            folder_path=_folder_path(client, db, str(folder_id) if folder_id else None, forbidden),
             page_count=doc.get("pageCount"),
             version=str(doc.get("version") or ""),
             created=doc.get("created"),
