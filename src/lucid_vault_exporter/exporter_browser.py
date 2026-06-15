@@ -24,6 +24,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from .control import Control
 from .state import StateDB
 from .utils import ensure_dir, sanitize_filename
 
@@ -127,18 +128,21 @@ class BrowserExporter:
     def __init__(
         self, driver: BrowserDriver, db: StateDB, vault_dir: Path,
         *, formats: list[str], delay: Callable[[], None] | None = None,
-        min_delay: float = 3.0, max_delay: float = 7.0,
+        min_delay: float = 3.0, max_delay: float = 7.0, control: Control | None = None,
     ) -> None:
         self._driver = driver
         self._db = db
         self._vault = vault_dir
         self._formats = formats
         self._delay = delay or (lambda: time.sleep(random.uniform(min_delay, max_delay)))
+        self._control = control
 
     def run(self, progress: Callable[[str], None] | None = None) -> dict[str, int]:
         stats = {"ok": 0, "failed": 0, "skipped": 0}
         for fmt in self._formats:
             for doc in self._db.documents_missing_artifact(fmt):
+                if self._control:
+                    self._control.checkpoint()
                 doc_id = doc["document_id"]
                 if fmt == "vsdx" and doc["product"] not in VSDX_PRODUCTS:
                     self._db.set_artifact(doc_id, "vsdx", "skipped",

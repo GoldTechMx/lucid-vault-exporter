@@ -65,6 +65,22 @@ def test_resume_skips_completed(tmp_path: Path):
     assert drv.calls == []
 
 
+def test_run_cancel_raises_before_processing(tmp_path: Path):
+    import pytest
+
+    from lucid_vault_exporter.control import Cancelled, Control
+    db = setup(tmp_path, [{"document_id": "d1", "title": "M", "product": "lucidchart",
+                           "folder_path": ""}])
+    ctrl = Control()
+    ctrl.cancel()
+    drv = FakeDriver()
+    exp = BrowserExporter(drv, db, tmp_path / "vault", formats=["pdf"], delay=lambda: None,
+                          control=ctrl)
+    with pytest.raises(Cancelled):
+        exp.run()
+    assert drv.calls == []  # cancelled before any download
+
+
 def test_run_returns_stats_and_passes_product(tmp_path: Path):
     db = setup(tmp_path, [
         {"document_id": "d1", "title": "Mapa", "product": "lucidchart", "folder_path": ""},
