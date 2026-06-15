@@ -97,3 +97,12 @@ def test_job_control_unknown_action(tmp_path, monkeypatch):
     job = web._registry.create("export_api")
     r = c.post(f"/api/jobs/{job.id}/frobnicate")
     assert r.status_code == 400
+
+
+def test_index_has_cards_and_tips(tmp_path, monkeypatch):
+    c = _client(tmp_path, monkeypatch)
+    html = c.get("/").text
+    for needle in ["How this works", "Connect to Lucid", "Sign in for PDF/VSDX",
+                   "Output folder", "What to export", "Event console",
+                   "http://localhost:8765/callback"]:
+        assert needle in html, needle

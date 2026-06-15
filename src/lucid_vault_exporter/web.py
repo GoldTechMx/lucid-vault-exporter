@@ -124,8 +124,195 @@ def _load_env_credentials() -> None:
         _redaction.set_secrets([s.lucid_client_secret])
 
 
-_PAGE = ("<!doctype html><html><head><meta charset='utf-8'><title>Lucid Vault Exporter</title>"
-         "</head><body><h1>Lucid Vault Exporter</h1><p>UI loads in Task 8.</p></body></html>")
+_PAGE = r"""<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucid Vault Exporter</title>
+<style>
+ :root{--b:#d0d7de;--fg:#1f2328;--mut:#656d76;--ok:#1a7f37;--bad:#cf222e;--acc:#0969da}
+ *{box-sizing:border-box}
+ body{font-family:system-ui,Segoe UI,Roboto,sans-serif;color:var(--fg);margin:0;background:#f6f8fa}
+ .wrap{max-width:860px;margin:0 auto;padding:1.5rem}
+ h1{margin:.2rem 0}
+ .sub{color:var(--mut);margin:.2rem 0 1rem}
+ .card{background:#fff;border:1px solid var(--b);border-radius:10px;padding:1rem 1.2rem;margin:1rem 0}
+ .card h2{margin:.1rem 0 .2rem;font-size:1.05rem}
+ .tip{color:var(--mut);font-size:.86rem;margin:.2rem 0 .7rem}
+ label{display:block;font-size:.85rem;margin:.5rem 0 .15rem;color:var(--mut)}
+ input[type=text],input[type=password],select{width:100%;padding:.5rem;border:1px solid var(--b);border-radius:6px;font:inherit}
+ button{padding:.5rem 1rem;border:1px solid var(--b);border-radius:6px;background:#fff;font:inherit;cursor:pointer}
+ button.primary{background:var(--acc);color:#fff;border-color:var(--acc)}
+ button:disabled{opacity:.5;cursor:not-allowed}
+ .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+ .pill{font-size:.8rem;padding:.1rem .5rem;border-radius:999px;border:1px solid var(--b)}
+ .ok{color:var(--ok)} .bad{color:var(--bad)}
+ details summary{cursor:pointer;font-weight:600}
+ .bar{background:#eaeef2;border-radius:6px;height:14px;overflow:hidden}
+ .fill{background:var(--ok);height:100%;width:0;transition:width .4s}
+ #console{background:#0d1117;color:#c9d1d9;font-family:ui-monospace,Consolas,monospace;font-size:.8rem;
+   padding:.6rem;border-radius:6px;height:220px;overflow:auto;white-space:pre-wrap}
+ code{background:#eff1f3;padding:0 .25rem;border-radius:4px}
+ .grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+ #picker{border:1px solid var(--b);border-radius:6px;max-height:180px;overflow:auto;margin-top:.4rem;display:none}
+ #picker div{padding:.3rem .5rem;cursor:pointer} #picker div:hover{background:#f0f3f6}
+</style></head><body><div class="wrap">
+<h1>Lucid Vault Exporter</h1>
+<p class="sub">Export a Lucid account into a local, Obsidian-ready vault - all from your browser. Read-only. Resumable. Runs on this machine only (127.0.0.1).</p>
+
+<details class="card" open><summary>How this works</summary>
+<p class="tip">Five steps, top to bottom:</p>
+<ol class="tip">
+ <li><b>Connect to Lucid</b> with an OAuth2 app (one-time setup, instructions below). This grants read-only access to your documents and folders. The API exports per-page PNG images + metadata and builds the Markdown notes.</li>
+ <li><b>(Optional) Sign in for PDF/VSDX.</b> Lucid's API cannot export PDF or Visio files, so those are fetched by automating the lucid.app editor in a real browser. This needs a normal sign-in (SSO/2FA) once. Skip it if PNG + notes are enough.</li>
+ <li><b>Pick an output folder.</b> A local disk is best; on a network share the vault still writes there but the small state database moves to local disk automatically.</li>
+ <li><b>Choose what to export</b> and start. Watch progress, ETA, and the live console. Pause, resume, or cancel anytime - it is resumable, so a re-run continues where it left off.</li>
+ <li><b>Done.</b> Open the output folder in Obsidian. An audit manifest is written under <code>_manifest/</code>.</li>
+</ol>
+</details>
+
+<div class="card">
+ <h2>1. Connect to Lucid</h2>
+ <p class="tip">Paste your OAuth2 app credentials. <b>One-time app setup:</b> go to <code>https://lucid.app/developer</code> &rarr; create an Application &rarr; add an OAuth 2.0 client &rarr; set the redirect URI to exactly <code>http://localhost:8765/callback</code> &rarr; request scopes <code>lucidchart.document.content:readonly</code>, <code>lucidspark.document.content:readonly</code>, <code>lucidscale.document.content:readonly</code>, <code>folder:readonly</code>, <code>offline_access</code>, <code>user.profile</code>. Then copy the Client ID and Secret here.</p>
+ <div class="grid">
+  <div><label>Client ID</label><input id="cid" type="text" autocomplete="off"></div>
+  <div><label>Client Secret</label><input id="csec" type="password" autocomplete="off"></div>
+ </div>
+ <label class="row" style="margin-top:.5rem"><input type="checkbox" id="remember"> Remember in <code>.env</code> (gitignored)</label>
+ <div class="row" style="margin-top:.6rem">
+  <button class="primary" id="connectBtn" onclick="connect()">Connect to Lucid</button>
+  <span id="connState" class="pill">not connected</span>
+ </div>
+</div>
+
+<div class="card">
+ <h2>2. Sign in for PDF/VSDX <span class="tip">(optional)</span></h2>
+ <p class="tip">Only needed for PDF and Visio (VSDX) files. Clicking this opens a real Chromium window on this machine - sign in to lucid.app normally (SSO/2FA supported). The session is saved to <code>.pw-profile/</code> for later headless runs. PNG images and notes do not need this.</p>
+ <div class="row">
+  <button id="loginBtn" onclick="browserLogin()">Sign in for PDF/VSDX</button>
+  <span id="loginState" class="pill">unknown</span>
+ </div>
+</div>
+
+<div class="card">
+ <h2>3. Output folder</h2>
+ <p class="tip">Where the vault is written. Prefer a local disk (e.g. <code>D:/lucid_export</code>); writing tens of thousands of small files to a network share during a long run is slow. The state database auto-moves to local disk if the share can't host it.</p>
+ <label>Folder path</label>
+ <div class="row"><input id="out" type="text" oninput="checkPath()" style="flex:1">
+  <button onclick="togglePicker()">Browse...</button></div>
+ <span id="pathMsg" class="tip"></span>
+ <div id="picker"></div>
+</div>
+
+<div class="card">
+ <h2>4. What to export</h2>
+ <p class="tip">Pick the scope. <b>Full export</b> runs both phases; <b>API only</b> does PNG + notes (no browser needed); <b>Browser only</b> fetches PDF/VSDX for already-inventoried docs; <b>Inventory</b> just lists documents; <b>Verify</b> recounts and rewrites the manifest.</p>
+ <div class="grid">
+  <div><label>Command</label><select id="command">
+   <option value="export">Full export (API + browser)</option>
+   <option value="export_api">API only (PNG + notes)</option>
+   <option value="export_browser">Browser only (PDF + VSDX)</option>
+   <option value="inventory">Inventory only</option>
+   <option value="verify">Verify (rewrite manifest)</option>
+  </select></div>
+  <div><label>Limit (0 = all; use a small number for a smoke test)</label><input id="limit" type="text" value="0"></div>
+ </div>
+ <label style="margin-top:.5rem">Products</label>
+ <div class="row">
+  <label class="row"><input type="checkbox" class="prod" value="lucidchart" checked> Lucidchart</label>
+  <label class="row"><input type="checkbox" class="prod" value="lucidspark" checked> Lucidspark</label>
+  <label class="row"><input type="checkbox" class="prod" value="lucidscale" checked> Lucidscale</label>
+ </div>
+ <label class="row" style="margin-top:.5rem"><input type="checkbox" id="force"> Force re-export everything (<code>--force</code>)</label>
+</div>
+
+<div class="card">
+ <h2>5. Run</h2>
+ <p class="tip">Start the export. It is resumable: already-finished artifacts are skipped on a re-run. Pause holds between documents; Cancel stops safely (partial work is kept).</p>
+ <div class="row">
+  <button class="primary" id="startBtn" onclick="startRun()">Start</button>
+  <button id="pauseBtn" onclick="togglePause()" disabled>Pause</button>
+  <button id="cancelBtn" onclick="cancelRun()" disabled>Cancel</button>
+  <span id="runState" class="pill">idle</span>
+ </div>
+ <div style="margin-top:.7rem" class="bar"><div class="fill" id="fill"></div></div>
+ <p class="tip" id="progLine">-</p>
+</div>
+
+<div class="card">
+ <h2>Event console</h2>
+ <p class="tip">Live log of the run. Secrets (tokens, client secret) are never shown here.</p>
+ <div id="console"></div>
+</div>
+
+<p class="sub">v__LVE_VERSION__ &middot; read-only against Lucid &middot; localhost only</p>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let jobId=null, sinceLog=0, paused=false, poll=null;
+async function jget(u){const r=await fetch(u);return r.json()}
+async function jpost(u,b){const r=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:b?JSON.stringify(b):null});return r}
+async function refreshStatus(){
+ const s=await jget('/api/status');
+ $('connState').textContent=s.connected?('connected'+(s.user?(' as '+s.user):'')):'not connected';
+ $('connState').className='pill '+(s.connected?'ok':'');
+ $('loginState').textContent=s.browser_logged_in?'signed in':'not signed in';
+ $('loginState').className='pill '+(s.browser_logged_in?'ok':'');
+ if(!$('out').value && s.output_dir) {$('out').value=s.output_dir; checkPath();}
+}
+async function connect(){
+ $('connState').textContent='connecting...';
+ const r=await jpost('/api/connect',{client_id:$('cid').value,client_secret:$('csec').value,remember:$('remember').checked});
+ if(!r.ok){const e=await r.json();$('connState').textContent='error: '+(e.detail||'');return}
+ const {authorize_url}=await r.json();
+ window.open(authorize_url,'_blank');
+ const t=setInterval(async()=>{const p=await jget('/api/connect/poll');
+   if(p.state==='connected'){clearInterval(t);refreshStatus()}
+   else if(p.state==='error'){clearInterval(t);$('connState').textContent='error: '+(p.error||'')}},1500);
+}
+async function browserLogin(){
+ $('loginState').textContent='opening browser...';
+ await jpost('/api/browser-login');
+ const t=setInterval(async()=>{const p=await jget('/api/browser-login/poll');
+   if(p.state==='logged_in'){clearInterval(t);refreshStatus()}
+   else if(p.state==='error'){clearInterval(t);$('loginState').textContent='error: '+(p.error||'')}},1500);
+}
+async function checkPath(){const p=$('out').value;if(!p){$('pathMsg').textContent='';return}
+ const r=await jget('/api/check-path?path='+encodeURIComponent(p));
+ $('pathMsg').textContent=r.msg+(r.abs?(' ('+r.abs+')'):'');$('pathMsg').className='tip '+(r.ok?'ok':'bad');}
+async function togglePicker(){const el=$('picker');if(el.style.display==='block'){el.style.display='none';return}
+ el.style.display='block';loadPicker($('out').value||'');}
+async function loadPicker(path){const r=await jget('/api/browse?path='+encodeURIComponent(path));
+ let h='<div onclick="pick(\''+(r.parent||'').replace(/\\/g,'\\\\')+'\')">.. ('+(r.parent||'top')+')</div>';
+ h+='<div onclick="useThis(\''+r.path.replace(/\\/g,'\\\\')+'\')"><b>[use this folder] '+r.path+'</b></div>';
+ for(const d of r.dirs){h+='<div onclick="pick(\''+d.path.replace(/\\/g,'\\\\')+'\')">'+d.name+'</div>'}
+ $('picker').innerHTML=h;}
+function pick(p){if(p)loadPicker(p)}
+function useThis(p){$('out').value=p;checkPath();$('picker').style.display='none'}
+async function startRun(){
+ const products=[...document.querySelectorAll('.prod:checked')].map(c=>c.value);
+ const body={command:$('command').value,options:{output_dir:$('out').value,products:products,
+   limit:parseInt($('limit').value||'0',10),force:$('force').checked}};
+ const r=await jpost('/api/run',body);const d=await r.json();
+ if(!r.ok){$('runState').textContent='error: '+(d.detail||'');return}
+ if(d.verified){$('runState').textContent='manifest rewritten';return}
+ jobId=d.job_id;sinceLog=0;$('console').textContent='';
+ $('startBtn').disabled=true;$('pauseBtn').disabled=false;$('cancelBtn').disabled=false;
+ poll=setInterval(pollJob,1500);pollJob();
+}
+async function pollJob(){if(!jobId)return;const j=await jget('/api/jobs/'+jobId+'?since='+sinceLog);
+ const pct=j.total?Math.round(100*j.done/j.total):0;$('fill').style.width=pct+'%';
+ const eta=j.eta!=null?(' ~'+Math.round(j.eta)+'s left'):'';
+ $('progLine').textContent=j.phase+': '+j.done+'/'+j.total+(j.detail?(' - '+j.detail):'')+eta+' ('+j.elapsed+'s)';
+ $('runState').textContent=j.paused?'paused':j.status;
+ if(j.logs&&j.logs.length){const c=$('console');c.textContent+=j.logs.join('\n')+'\n';c.scrollTop=c.scrollHeight;sinceLog=j.log_count;}
+ if(['done','error','cancelled'].includes(j.status)){clearInterval(poll);
+   $('startBtn').disabled=false;$('pauseBtn').disabled=true;$('cancelBtn').disabled=true;
+   if(j.result)$('console').textContent+='\nResult: '+JSON.stringify(j.result)+'\n';
+   if(j.error)$('console').textContent+='\nError: '+j.error+'\n';refreshStatus();}
+}
+async function togglePause(){if(!jobId)return;paused=!paused;await jpost('/api/jobs/'+jobId+'/'+(paused?'pause':'resume'));$('pauseBtn').textContent=paused?'Resume':'Pause';}
+async function cancelRun(){if(!jobId)return;await jpost('/api/jobs/'+jobId+'/cancel');}
+refreshStatus();setInterval(refreshStatus,5000);
+</script></body></html>"""
 
 
 def _settings() -> Settings:
