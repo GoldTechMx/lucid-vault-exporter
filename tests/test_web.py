@@ -29,6 +29,8 @@ def test_status_shape(tmp_path, monkeypatch):
     data = c.get("/api/status").json()
     assert data["documents"] == 1
     assert data["artifacts"]["png"]["ok"] == 1
+    assert data["artifacts"]["pdf"]["ok"] == 0
+    assert data["artifacts"]["vsdx"]["ok"] == 0
     assert "connected" in data and "browser_logged_in" in data
 
 

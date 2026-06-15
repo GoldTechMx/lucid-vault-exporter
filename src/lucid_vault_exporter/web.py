@@ -221,7 +221,6 @@ def _build_config(opts: dict[str, Any]) -> Config:
 
 
 def _run_job(job: Any, cfg: Config, command: str, options: dict[str, Any]) -> None:
-    from .exporter_browser import BrowserExporter, PlaywrightDriver
     from .pipeline import refresh_notes, run_api_phase
     from .reports import write_manifest
 
@@ -252,6 +251,7 @@ def _run_job(job: Any, cfg: Config, command: str, options: dict[str, Any]) -> No
                 finally:
                     client.close()
             if command in ("export", "export_browser") and cfg.browser.enabled:
+                from .exporter_browser import BrowserExporter, PlaywrightDriver
                 driver = PlaywrightDriver(PROFILE_DIR, headless=cfg.browser.headless,
                                           failure_dir=vault / "_manifest" / "browser_failures")
                 try:
