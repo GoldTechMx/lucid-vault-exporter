@@ -35,6 +35,27 @@ def test_job_progress_resets_phase_clock():
     job.started = job.phase_started = 100.0
     job.progress("API", 3, 10, "doc")
     assert job.phase == "API" and job.done == 3 and job.total == 10 and job.detail == "doc"
+    assert job.phase_started != 100.0  # changed to a real monotonic value on phase switch
+    # a same-phase progress must NOT reset the phase clock
+    same = job.phase_started
+    job.progress("API", 5, 10, "doc2")
+    assert job.phase_started == same and job.done == 5
+
+
+def test_redaction_filter_scrubs_string_args():
+    f = RedactionFilter()
+    f.set_secrets(["t0pSecret"])
+    rec = logging.LogRecord("n", logging.INFO, __file__, 1, "value=%s end", ("t0pSecret",), None)
+    f.filter(rec)
+    assert "t0pSecret" not in rec.getMessage()
+    assert rec.getMessage() == "value=*** end"
+
+
+def test_job_progress_total_none_becomes_zero():
+    reg = JobRegistry()
+    job = reg.create("export")
+    job.progress("scan", 0, None, "x")
+    assert job.total == 0
 
 
 def test_log_handler_routes_to_active_job_and_bounds_buffer():
