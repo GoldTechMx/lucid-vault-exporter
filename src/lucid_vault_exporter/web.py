@@ -280,13 +280,14 @@ async function checkPath(){const p=$('out').value;if(!p){$('pathMsg').textConten
  $('pathMsg').textContent=r.msg+(r.abs?(' ('+r.abs+')'):'');$('pathMsg').className='tip '+(r.ok?'ok':'bad');}
 async function togglePicker(){const el=$('picker');if(el.style.display==='block'){el.style.display='none';return}
  el.style.display='block';loadPicker($('out').value||'');}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 async function loadPicker(path){const r=await jget('/api/browse?path='+encodeURIComponent(path));
- let h='<div onclick="pick(\''+(r.parent||'').replace(/\\/g,'\\\\')+'\')">.. ('+(r.parent||'top')+')</div>';
- h+='<div onclick="useThis(\''+r.path.replace(/\\/g,'\\\\')+'\')"><b>[use this folder] '+r.path+'</b></div>';
- for(const d of r.dirs){h+='<div onclick="pick(\''+d.path.replace(/\\/g,'\\\\')+'\')">'+d.name+'</div>'}
+ let h='<div onclick="pick(\''+encodeURIComponent(r.parent||'')+'\')">.. ('+esc(r.parent||'top')+')</div>';
+ h+='<div onclick="useThis(\''+encodeURIComponent(r.path)+'\')"><b>[use this folder] '+esc(r.path)+'</b></div>';
+ for(const d of r.dirs){h+='<div onclick="pick(\''+encodeURIComponent(d.path)+'\')">'+esc(d.name)+'</div>'}
  $('picker').innerHTML=h;}
-function pick(p){if(p)loadPicker(p)}
-function useThis(p){$('out').value=p;checkPath();$('picker').style.display='none'}
+function pick(p){if(p)loadPicker(decodeURIComponent(p))}
+function useThis(p){$('out').value=decodeURIComponent(p);checkPath();$('picker').style.display='none'}
 async function startRun(){
  const products=[...document.querySelectorAll('.prod:checked')].map(c=>c.value);
  const body={command:$('command').value,options:{output_dir:$('out').value,products:products,
