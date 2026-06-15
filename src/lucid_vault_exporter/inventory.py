@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
+from .control import Control
 from .state import StateDB
 from .utils import sanitize_filename
 
@@ -63,10 +64,15 @@ def _folder_path(
     return cumulative
 
 
-def run_inventory(client: InventoryClient, db: StateDB, *, products: list[str]) -> int:
+def run_inventory(
+    client: InventoryClient, db: StateDB, *, products: list[str],
+    control: Control | None = None,
+) -> int:
     count = 0
     forbidden: set[str] = set()  # folder ids known to be inaccessible (negative cache)
     for doc in client.search_documents(products=products, exclude_trashed=True):
+        if control:
+            control.checkpoint()
         doc_id = str(doc.get("documentId") or doc.get("id"))
         folder_id = doc.get("parent") or doc.get("folderId")
         owner = doc.get("owner")

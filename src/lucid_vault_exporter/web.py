@@ -101,8 +101,7 @@ def create_app() -> FastAPI:
                 client = _client(cfg, Settings())
                 try:
                     with StateDB.open(cfg.output_dir) as db:
-                        run_api_phase(client, db, cfg.output_dir, products=list(cfg.products),
-                                      should_stop=lambda: bool(run_state["stop"]))
+                        run_api_phase(client, db, cfg.output_dir, products=list(cfg.products))
                         write_manifest(db, cfg.output_dir)
                 finally:
                     client.close()

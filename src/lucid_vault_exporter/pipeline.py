@@ -9,6 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .control import Control
 from .exporter_api import export_document_pngs
 from .inventory import run_inventory
 from .obsidian import write_note
@@ -22,10 +23,10 @@ ProgressFn = Callable[[int, int, str], None]
 def run_api_phase(
     client: Any, db: StateDB, vault_dir: Path,
     *, products: list[str] | None = None, progress: ProgressFn | None = None,
-    should_stop: Callable[[], bool] | None = None, limit: int = 0,
+    control: Control | None = None, limit: int = 0,
 ) -> dict[str, int]:
     products = products or ["lucidchart", "lucidspark", "lucidscale"]
-    n_docs = run_inventory(client, db, products=products)
+    n_docs = run_inventory(client, db, products=products, control=control)
     todo = db.documents_missing_artifact("png")
     # `limit` caps the work to the first N pending documents (smoke test); 0 = no cap.
     if limit:
@@ -33,9 +34,8 @@ def run_api_phase(
     stats = {"documents": n_docs, "png_ok": 0, "png_failed": 0}
     total = len(todo)
     for i, doc in enumerate(todo, 1):
-        if should_stop and should_stop():
-            log.info("Stop requested; %d/%d documents processed.", i - 1, total)
-            break
+        if control:
+            control.checkpoint()  # blocks while paused; raises Cancelled on cancel
         if progress:
             progress(i, total, doc["title"])
         pngs = export_document_pngs(client, db, doc, vault_dir)

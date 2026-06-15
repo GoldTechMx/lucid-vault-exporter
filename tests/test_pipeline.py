@@ -65,9 +65,13 @@ def test_refresh_notes_adds_sidecar_links(tmp_path: Path):
         assert "![[" in text and ".png]]" in text
 
 
-def test_api_phase_should_stop_halts(tmp_path: Path):
+def test_api_phase_cancel_raises(tmp_path: Path):
+    import pytest
+
+    from lucid_vault_exporter.control import Cancelled, Control
+
     vault = tmp_path / "vault"
-    with StateDB.open(vault) as db:
-        # stop immediately: no documents should be processed
-        stats = run_api_phase(FakeClient(), db, vault, should_stop=lambda: True)
-        assert stats["png_ok"] == 0
+    ctrl = Control()
+    ctrl.cancel()  # pre-cancelled: the first checkpoint raises
+    with StateDB.open(vault) as db, pytest.raises(Cancelled):
+        run_api_phase(FakeClient(), db, vault, control=ctrl)

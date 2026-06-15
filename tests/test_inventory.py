@@ -45,6 +45,26 @@ def test_inventory_is_idempotent(tmp_path: Path):
         assert len(db.all_documents()) == 3
 
 
+def test_inventory_cancel_raises(tmp_path):
+    import pytest
+
+    from lucid_vault_exporter.control import Cancelled, Control
+    from lucid_vault_exporter.inventory import run_inventory
+    from lucid_vault_exporter.state import StateDB
+
+    class C:
+        def search_documents(self, **kw):
+            yield {"documentId": "d1", "title": "A", "product": "lucidchart", "parent": None}
+            yield {"documentId": "d2", "title": "B", "product": "lucidchart", "parent": None}
+        def get_folder(self, fid):
+            return None
+
+    ctrl = Control()
+    ctrl.cancel()
+    with StateDB(tmp_path / "s.sqlite") as db, pytest.raises(Cancelled):
+        run_inventory(C(), db, products=["lucidchart"], control=ctrl)
+
+
 def test_inventory_nested_under_cached_ancestor(tmp_path: Path):
     # f1=Clientes (root) -> f2=ACME -> f5=Sub. d1 under f2 (caches f1,f2), d2 under f5.
     class C:
