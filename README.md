@@ -127,21 +127,27 @@ lucid-vault-exporter verify
 ## Web UI
 
 ```bash
-lucid-vault-exporter serve
-# → http://127.0.0.1:8123
+lucid-vault-exporter serve            # -> http://127.0.0.1:8123  (localhost only)
 ```
 
-The web UI runs **Phase 1 (API)** with live progress bars and Start / Resume / Stop controls.
-It is accessible on localhost only and requires the `[web]` extra:
+A guided, self-service page (English, with inline tips) that runs the whole export from the
+browser - no terminal needed:
 
-```bash
-pip install "lucid-vault-exporter[web]"
-```
+- **Connect to Lucid** - paste your OAuth2 `client_id` / `client_secret`, click **Connect**, and
+  authorize in the browser tab that opens. "Remember in `.env`" stores them (gitignored). The
+  page includes the one-time app-setup steps (redirect URI, scopes).
+- **Sign in for PDF/VSDX** (optional) - opens a real Chromium window for the lucid.app login that
+  the browser phase needs. Skip it if PNG + notes are enough.
+- **Output folder** - type a path or use the server-side **Browse...** picker, with live
+  validation.
+- **What to export** - Full / API only / Browser only / Inventory / Verify, product checkboxes,
+  a `--limit` for smoke tests, and `--force`.
+- **Run** - Start / Pause / Resume / Cancel with a progress bar, ETA, and a **live event
+  console**. Resumable: a re-run continues where it left off.
 
-> **Phase 2 (PDF/VSDX browser automation) stays CLI-only.** The browser login window needs to
-> be visible on first use (SSO/2FA), which is not practical inside a headless web server
-> process. Run `lucid-vault-exporter login` and `lucid-vault-exporter export` from a terminal
-> for Phase 2.
+Requires the `web` extra (`pip install "lucid-vault-exporter[web]"`). The browser phase still
+uses Playwright, so also install the `browser` extra and `playwright install chromium` if you
+want PDF/VSDX. The UI is localhost-only; tokens never appear in the console.
 
 ---
 
