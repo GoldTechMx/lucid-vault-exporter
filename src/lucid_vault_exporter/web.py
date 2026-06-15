@@ -440,6 +440,8 @@ def _run_job(job: Any, cfg: Config, command: str, options: dict[str, Any]) -> No
                     client.close()
             if command in ("export", "export_browser") and cfg.browser.enabled:
                 from .exporter_browser import BrowserExporter, PlaywrightDriver
+                btotal = sum(len(db.documents_missing_artifact(f)) for f in cfg.browser.formats)
+                job.progress("Browser export", 0, btotal, "starting")
                 driver = PlaywrightDriver(PROFILE_DIR, headless=cfg.browser.headless,
                                           failure_dir=vault / "_manifest" / "browser_failures")
                 try:
@@ -449,7 +451,7 @@ def _run_job(job: Any, cfg: Config, command: str, options: dict[str, Any]) -> No
                         max_delay=cfg.browser.max_delay_seconds, control=job.control)
 
                     def bprog(label: str) -> None:
-                        job.progress("Browser export", job.done + 1, job.total, label)
+                        job.progress("Browser export", job.done + 1, btotal, label)
 
                     bstats = exporter.run(progress=bprog)
                     job.result = {**(job.result or {}), "browser": bstats}

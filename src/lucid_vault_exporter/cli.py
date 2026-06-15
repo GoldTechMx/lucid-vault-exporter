@@ -232,7 +232,7 @@ def serve(port: Annotated[int, typer.Option("--port")] = 8123) -> None:
     except ImportError as exc:
         console.print("[red]Install the web extra: pip install 'lucid-vault-exporter[web]'[/red]")
         raise typer.Exit(1) from exc
-    uvicorn.run(create_app(), host="127.0.0.1", port=port)
+    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
 
 
 def main() -> None:
