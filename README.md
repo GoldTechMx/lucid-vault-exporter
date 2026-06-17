@@ -135,7 +135,8 @@ browser - no terminal needed:
 
 - **Connect to Lucid** - paste your OAuth2 `client_id` / `client_secret`, click **Connect**, and
   authorize in the browser tab that opens. "Remember in `.env`" stores them (gitignored). The
-  page includes the one-time app-setup steps (redirect URI, scopes).
+  page includes the one-time app-setup steps (redirect URI, scopes). If you remembered them and a
+  valid token is stored, the next `serve` **auto-connects** - no need to re-enter anything.
 - **Sign in for PDF/VSDX** (optional) - opens a real Chromium window for the lucid.app login that
   the browser phase needs. Skip it if PNG + notes are enough.
 - **Output folder** - type a path or use the server-side **Browse...** picker, with live
