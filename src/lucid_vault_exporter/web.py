@@ -459,31 +459,40 @@ def _run_job(job: Any, cfg: Config, command: str, options: dict[str, Any]) -> No
     job.started = job.phase_started = time.monotonic()
     vault = cfg.output_dir
     limit = int(options.get("limit") or 0)
+    log.info("Starting '%s' -> %s%s", command, vault, f" (limit {limit})" if limit else "")
     try:
         with StateDB.open(vault) as db:
             if options.get("force"):
+                log.info("Force mode: resetting all artifact statuses to pending.")
                 db.reset_artifacts()
             if command in ("export", "export_api", "inventory"):
                 client = _make_client(cfg)
                 try:
                     if command == "inventory":
                         from .inventory import run_inventory
+                        log.info("Inventory: scanning all documents...")
                         job.progress("inventory", 0, None, "scanning")
                         n = run_inventory(client, db, products=list(cfg.products),
                                           control=job.control)
                         job.result = {"documents": n}
+                        log.info("Inventory done: %d documents.", n)
                     else:
+                        log.info("Phase 1 (API): inventory, then per-page PNG + notes...")
+
                         def on_progress(done: int, total: int, label: str) -> None:
                             job.progress("API export", done, total, label)
+                            log.info("PNG %d/%d  %s", done, total, label)
                         stats = run_api_phase(client, db, vault, products=list(cfg.products),
                                               progress=on_progress, control=job.control,
                                               limit=limit)
                         job.result = dict(stats)
+                        log.info("Phase 1 (API) done: %s", stats)
                 finally:
                     client.close()
             if command in ("export", "export_browser") and cfg.browser.enabled:
                 from .exporter_browser import BrowserExporter, PlaywrightDriver
                 btotal = sum(len(db.documents_missing_artifact(f)) for f in cfg.browser.formats)
+                log.info("Phase 2 (browser): %d PDF/VSDX artifact(s) pending...", btotal)
                 job.progress("Browser export", 0, btotal, "starting")
                 driver = PlaywrightDriver(PROFILE_DIR, headless=cfg.browser.headless,
                                           failure_dir=vault / "_manifest" / "browser_failures")
@@ -495,15 +504,18 @@ def _run_job(job: Any, cfg: Config, command: str, options: dict[str, Any]) -> No
 
                     def bprog(label: str) -> None:
                         job.progress("Browser export", job.done + 1, btotal, label)
+                        log.info("[%d/%d] %s", job.done, btotal, label)
 
                     bstats = exporter.run(progress=bprog)
                     job.result = {**(job.result or {}), "browser": bstats}
+                    log.info("Phase 2 (browser) done: %s", bstats)
                 finally:
                     driver.close()
+                log.info("Refreshing notes with sidecar links...")
                 refresh_notes(db, vault)
             write_manifest(db, vault)
         job.status = "done"
-        log.info("%s complete.", command)
+        log.info("%s complete. Manifest written under _manifest/.", command)
     except Cancelled:
         job.status = "cancelled"
         log.info("%s cancelled. Re-run to continue where it left off.", command)

@@ -155,9 +155,12 @@ class BrowserExporter:
                 try:
                     data = self._driver.download_export(doc_id, fmt, product=doc["product"])
                 except Exception as exc:  # noqa: BLE001 - any UI failure: record, continue
-                    self._db.set_artifact(doc_id, fmt, "failed", error=str(exc)[:500])
-                    self._db.record_error(doc_id, f"{fmt}_export", str(exc)[:500])
-                    log.warning("%s export failed for %s: %s", fmt, doc["title"], exc)
+                    # Playwright errors carry a multi-line "Call log" dump; keep the recorded
+                    # message + the log line to one concise line so the console stays readable.
+                    brief = (str(exc).splitlines() or [exc.__class__.__name__])[0][:200]
+                    self._db.set_artifact(doc_id, fmt, "failed", error=brief)
+                    self._db.record_error(doc_id, f"{fmt}_export", brief)
+                    log.warning("%s failed: %s - %s", fmt, doc["title"], brief)
                     stats["failed"] += 1
                     self._delay()
                     continue
