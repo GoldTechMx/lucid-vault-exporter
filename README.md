@@ -149,6 +149,12 @@ Requires the `web` extra (`pip install "lucid-vault-exporter[web]"`). The browse
 uses Playwright, so also install the `browser` extra and `playwright install chromium` if you
 want PDF/VSDX. The UI is localhost-only; tokens never appear in the console.
 
+> **On a network share?** `serve` (and the browser phase) need native extension modules
+> (`uvicorn[standard]`, Playwright) that Windows cannot load from a UNC/SMB path. Install and run
+> from a virtualenv on a **local disk** - the source tree can stay on the share via an editable
+> install. The connection is validated once per server session, so you click **Connect** after
+> each `serve` even if a previous run already stored a token.
+
 ---
 
 ## Rate limits
