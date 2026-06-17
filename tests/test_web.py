@@ -9,7 +9,8 @@ def _client(tmp_path, monkeypatch):
     (tmp_path / "config.yml").write_text("output_dir: ./vault\n", encoding="utf-8")
     web._registry.jobs.clear()
     web._registry.active = None
-    web._conn.update({"status": "idle", "user": None, "error": None})
+    web._conn.update({"status": "idle", "user": None, "error": None,
+                      "client_id": "", "client_secret": ""})
     web._browser.update({"status": "idle", "error": None})
     return TestClient(create_app())
 
@@ -18,6 +19,46 @@ def test_index_serves_html(tmp_path, monkeypatch):
     c = _client(tmp_path, monkeypatch)
     r = c.get("/")
     assert r.status_code == 200 and "Lucid Vault Exporter" in r.text
+
+
+def test_status_auto_connects_with_saved_creds(tmp_path, monkeypatch):
+    import json
+    import time
+
+    import httpx
+
+    c = _client(tmp_path, monkeypatch)
+    # saved creds + a stored token that is not near expiry
+    (tmp_path / ".lucid_tokens.json").write_text(
+        json.dumps({"access_token": "at", "refresh_token": "rt",
+                    "expires_at": time.time() + 3600}),
+        encoding="utf-8",
+    )
+    web._conn.update({"client_id": "cid", "client_secret": "sec", "status": "idle"})
+
+    class FakeResp:
+        def __init__(self, code, payload=None):
+            self.status_code = code
+            self._p = payload or {}
+
+        def json(self):
+            return self._p
+
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: FakeResp(200))
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResp(200, {"name": "Boby"}))
+
+    data = c.get("/api/status").json()
+    assert data["connected"] is True
+    assert data["user"] == "Boby"
+    assert data["saved_client_id"] == "cid"
+
+
+def test_status_stays_idle_without_token(tmp_path, monkeypatch):
+    # creds present but no .lucid_tokens.json -> must NOT auto-connect (and must not call network)
+    c = _client(tmp_path, monkeypatch)
+    web._conn.update({"client_id": "cid", "client_secret": "sec", "status": "idle"})
+    data = c.get("/api/status").json()
+    assert data["connected"] is False
 
 
 def test_status_shape(tmp_path, monkeypatch):

@@ -124,6 +124,47 @@ def _load_env_credentials() -> None:
         _redaction.set_secrets([s.lucid_client_secret])
 
 
+def _try_auto_connect() -> None:
+    """If .env credentials + a usable stored token already exist, mark the session connected
+    without re-running the OAuth flow - so a remembered setup 'just works' on the next page load.
+    Called lazily from /api/status. Validates with one lightweight search call; on any failure it
+    stays idle so the user can connect manually. Never raises (status must not 500)."""
+    if _conn["status"] == "connected":
+        return
+    s = Settings()
+    cid = _conn.get("client_id") or s.lucid_client_id
+    csec = _conn.get("client_secret") or s.lucid_client_secret
+    if not cid or not csec or not TOKENS_PATH.exists():
+        return
+    try:
+        import httpx
+
+        from .oauth import TokenStore, refresh
+        store = TokenStore(TOKENS_PATH)
+        token = store.access_token() or refresh(
+            store, f"{s.lucid_api_base}/oauth2/token", cid, csec)
+        headers = {"Authorization": f"Bearer {token}", "Lucid-Api-Version": "1",
+                   "Accept": "application/json"}
+        r = httpx.post(f"{s.lucid_api_base}/documents/search?pageSize=1", headers=headers,
+                       json={"product": ["lucidchart", "lucidspark", "lucidscale"]}, timeout=15)
+        if r.status_code != 200:
+            return
+        name = "Lucid user"
+        try:
+            pr = httpx.get(f"{s.lucid_api_base}/users/me/profile", headers=headers, timeout=10)
+            if pr.status_code == 200:
+                j = pr.json()
+                name = j.get("name") or j.get("username") or j.get("email") or name
+        except Exception:  # noqa: BLE001 - the name is best-effort; connection is already proven
+            pass
+        _conn.update({"client_id": cid, "client_secret": csec,
+                      "status": "connected", "user": name})
+        _redaction.set_secrets([csec])
+        log.info("Auto-connected to Lucid from saved credentials.")
+    except Exception as exc:  # noqa: BLE001 - stay idle; the user can connect manually
+        log.info("Auto-connect skipped: %s", exc)
+
+
 _PAGE = r"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lucid Vault Exporter</title>
@@ -257,6 +298,8 @@ async function refreshStatus(){
  $('loginState').textContent=s.browser_logged_in?'signed in':'not signed in';
  $('loginState').className='pill '+(s.browser_logged_in?'ok':'');
  if(!$('out').value && s.output_dir) {$('out').value=s.output_dir; checkPath();}
+ if(!$('cid').value && s.saved_client_id){$('cid').value=s.saved_client_id;}
+ if(s.connected){$('cid').disabled=true;$('csec').disabled=true;$('connectBtn').textContent='Reconnect';}
 }
 async function connect(){
  $('connState').textContent='connecting...';
@@ -487,6 +530,7 @@ def create_app() -> Any:
 
     @app.get("/api/status")
     def status() -> JSONResponse:
+        _try_auto_connect()  # remembered .env creds + a valid token -> connected without re-OAuth
         try:
             cfg = Config.load(Path("config.yml"))
             output_dir = str(cfg.output_dir)
@@ -504,6 +548,7 @@ def create_app() -> Any:
         return JSONResponse({
             "connected": _conn["status"] == "connected",
             "user": _conn["user"],
+            "saved_client_id": _conn.get("client_id") or "",
             "browser_logged_in": _browser_logged_in(),
             "output_dir": output_dir,
             "documents": documents,
